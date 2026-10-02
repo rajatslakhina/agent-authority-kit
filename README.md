@@ -43,7 +43,7 @@ CapabilityToken  ──────────────  bound to the agent'
 
 Every protected call:
 AuthorityBroker.authorize(Presentation(token, DPoPProof), for: ProtectedOperation)
-        MAC → expiry → revocation (token · grant · every agent in the act chain · generation)
+        MAC → expiry → revocation (token · ancestor tokens · grant · every agent in the act chain · generation)
         → audience → scope → proof key = cnf.jkt → proof signature → proof bound to this token
         → proof names this method + target → proof fresh → proof id never seen before
 ```
@@ -74,7 +74,7 @@ The DPoP replay cache follows the same rule: when it is full of still-fresh proo
 
 OAuth lets an authorization server silently narrow scope. For an agent that is worse than a refusal: it plans a multi-step task around powers it doesn't have and fails halfway, after side effects. The policy is all-or-nothing.
 
-The policy is a protocol (`AuthorityPolicy`) because product teams own it and it will be wrong sometimes. So the broker does not trust it: it rejects non-finite or non-positive lifetimes, step-up sets that name unrequested scopes, and chain limits below the actual chain; it clamps every lifetime to `hardMaxLifetime` and every chain to `hardMaxChainLength`; and it requires consent for every sensitive scope even if the policy asks for none. `AdversarialSuiteTests.testSuiteFailsAgainstABrokenPolicy` runs the whole suite against a policy that grants everything and asserts, for all 20 scenarios, that exactly the two policy-dependent ones now fail and the other 18 — held by the broker's own invariants — still pass.
+The policy is a protocol (`AuthorityPolicy`) because product teams own it and it will be wrong sometimes. So the broker does not trust it: it rejects non-finite or non-positive lifetimes, step-up sets that name unrequested scopes, and chain limits below the actual chain; it clamps every lifetime to `hardMaxLifetime` and refuses any chain longer than `hardMaxChainLength`; and it requires consent for every sensitive scope even if the policy asks for none. `AdversarialSuiteTests.testSuiteFailsAgainstABrokenPolicy` runs the whole suite against a policy that grants everything and asserts, for all 20 scenarios, that exactly the two policy-dependent ones now fail and the other 18 — held by the broker's own invariants — still pass.
 
 ### 4. HMAC tokens, P-256 proofs, keyed audit chain
 
@@ -160,12 +160,12 @@ Dependencies: on Apple platforms the code links only CryptoKit. [apple/swift-cry
 ```bash
 swift test                                               # macOS
 swift test -Xlinker --allow-shlib-undefined              # Linux (see below)
-Scripts/mutation-check.sh                                # macOS; prefix EXTRA_TEST_FLAGS="-Xlinker --allow-shlib-undefined" on Linux
+bash Scripts/mutation-check.sh                           # macOS; prefix EXTRA_TEST_FLAGS="-Xlinker --allow-shlib-undefined" on Linux
 ```
 
 On Linux the toolchain's `libswiftObservation.so` references `swift::threading::fatal` without any shipped library exporting it, so linking a test binary that uses Observation fails under the linker's default `--no-allow-shlib-undefined`. The symbol is only reached on a fatal path; the flag is confined to the Linux test link.
 
-`Scripts/mutation-check.sh` is the answer to "would the tests notice?". It applies nine mutations, each removing one guarantee this README claims — the post-consent witness re-check, the replay-window boundary, the consent floor, the proof-key binding, act-chain revocation, fail-closed revocation capacity, the post-suspension parent re-check, sub-delegation proof of possession, and the audit MAC check — and requires `swift test` to fail for every one.
+`Scripts/mutation-check.sh` (run it with `bash`; web uploads drop the executable bit) is the answer to "would the tests notice?". It applies nine mutations, each removing one guarantee this README claims — the post-consent witness re-check, the replay-window boundary, the consent floor, the proof-key binding, act-chain revocation, fail-closed revocation capacity, the post-suspension parent re-check, sub-delegation proof of possession, and the audit MAC check — and requires `swift test` to fail for every one.
 
 ## What it does not do
 
@@ -176,7 +176,15 @@ On Linux the toolchain's `libswiftObservation.so` references `swift::threading::
 
 ## Verification
 
-_Written after the first CI run reports — see the Actions tab._
+What was actually run, and what was not:
+
+- **CI** ([Actions](https://github.com/rajatslakhina/agent-authority-kit/actions/workflows/ci.yml)), on every push to `main`:
+  - *Linux* (`swift:6.1-noble` container): `swift build -Xswiftc -warnings-as-errors`, then `swift test -Xlinker --allow-shlib-undefined`. On the first run: **69 tests, 0 failures**.
+  - *macOS* (`macos-15`, Xcode 16.4, Swift 6.1.2): `swift test -Xswiftc -warnings-as-errors` against the CryptoKit code path — **69 tests, 0 failures, 0 warnings** — then `xcodebuild build -scheme AgentAuthority-Package -destination 'generic/platform=iOS Simulator'` — **BUILD SUCCEEDED**, which is the only place the SwiftUI views are compiled.
+- **Locally**, from a clean build on Swift 6.1.2 / Ubuntu 24.04: `swift test -Xswiftc -warnings-as-errors -Xlinker --allow-shlib-undefined` — **69 tests, 0 failures, 0 warnings**.
+- **Mutation check** (`Scripts/mutation-check.sh`, Linux): **9 of 9 mutations caught** — each one, applied alone, makes `swift test` fail, and the script prints which tests caught it. (Run in two passes: the first was interrupted while running #6, so #6–#9 were re-run.)
+- **Demo app**: its own CI resolves this package from GitHub (it resolved `agent-authority-kit @ 1.0.0`) and builds the app for the iOS Simulator — **BUILD SUCCEEDED**.
+- **Not done: the app has not been run on a Simulator.** Computer-use access to Xcode and Simulator was granted for this release, but the Mac's screen was locked, and macOS blocks every click while it is. Three attempts were refused the same way. So the app was compiled for the Simulator but never launched there, and no screenshots exist. "It builds for the Simulator" is not a claim that it ran.
 
 ## License
 
