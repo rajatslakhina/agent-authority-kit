@@ -106,11 +106,17 @@ final class AuthorityConsoleModelTests: XCTestCase {
         model.cancelJob()
         guard case .stopped(_, let reason) = model.job else { return XCTFail("cancel did not stop the job") }
         XCTAssertEqual(reason, "cancelled")
-        // A different step count, so any write from the old run is visible.
-        model.startJob(as: Ledger.siri, steps: 5)
-        await waitUntil { model.job == .finished(steps: 5) }
-        try? await Task.sleep(for: .milliseconds(30))
-        XCTAssertEqual(model.job, .finished(steps: 5), "the cancelled run wrote into the new run's state")
+        // The next run reaches a terminal state immediately (the MCP client
+        // holds no token), so any late write from the cancelled Siri run —
+        // `.running(_, of: 3)` or `.finished(steps: 3)` — would replace it.
+        model.startJob(as: Ledger.desktopMCP, steps: 5)
+        await waitUntil {
+            if case .stopped = model.job { return true }
+            return false
+        }
+        XCTAssertEqual(model.job, .stopped(atStep: 1, reason: "no token"))
+        try? await Task.sleep(for: .milliseconds(60))
+        XCTAssertEqual(model.job, .stopped(atStep: 1, reason: "no token"), "the cancelled run wrote into the new run's state")
     }
 
     func testDismissingTheConsentSheetDeclines() async throws {
