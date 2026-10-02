@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux · swift build (warnings as errors) + swift test
+    runs-on: ubuntu-latest
+    container: swift:6.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (warnings are errors)
+        run: swift build -Xswiftc -warnings-as-errors
+      # The Linux toolchain's libswiftObservation.so references
+      # swift::threading::fatal without any shipped library exporting it, so
+      # linking a test binary that uses Observation fails under the default
+      # --no-allow-shlib-undefined. The symbol is only reached on a fatal path.
+      - name: Test
+        run: swift test -Xlinker --allow-shlib-undefined
+
+  macos:
+    name: macOS · swift test + iOS Simulator compile
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Test (macOS, CryptoKit path)
+        run: swift test -Xswiftc -warnings-as-errors
+      - name: Build for iOS Simulator (compiles the SwiftUI views)
+        run: |
+          xcodebuild build \
+            -scheme AgentAuthority-Package \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
